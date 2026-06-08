@@ -245,6 +245,10 @@ select option { background: var(--surf2); }
   <div style="flex:1"></div>
   <span id="conn-dot"></span>
   <span id="conn-label">Disconnected</span>
+  <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer;user-select:none" title="Send LISTEN ON automatically after connecting">
+    <input type="checkbox" id="auto-listen" checked style="accent-color:var(--green)">
+    Auto LISTEN ON
+  </label>
   <button class="btn primary" id="connect-btn" onclick="toggleConnect()">Connect</button>
 </div>
 
@@ -524,6 +528,15 @@ async function toggleConnect() {
     setConnUI(true);
     addConsole('Serial port opened.', 'sys');
     readLoop(); // runs concurrently; do not await
+    if (document.getElementById('auto-listen').checked) {
+      // Give the device time to send its banner before issuing commands
+      setTimeout(async () => {
+        if (serialConnected) {
+          await serialWrite('LISTEN ON');
+          addConsole('Auto: LISTEN ON sent.', 'sys');
+        }
+      }, 600);
+    }
   } catch (e) {
     addConsole('Connect failed: ' + e.message, 'err');
   }
