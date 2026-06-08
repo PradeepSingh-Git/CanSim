@@ -1,0 +1,44 @@
+# ── Build output ────────────────────────────────────────────────────────────
+Debug/
+Release/
+build/
+
+# ── STM32CubeIDE / Eclipse artefacts ────────────────────────────────────────
+.metadata/
+.settings/
+.cproject
+.project
+*.launch
+
+# ── Object / dependency / analysis files (if ever outside Debug/) ───────────
+*.o
+*.d
+*.su
+*.cyclo
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+
+# ── macOS ────────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ── Arduino IDE build artefacts ──────────────────────────────────────────────
+build/
+*.ino.elf
+*.ino.hex
+*.ino.bin
+
+# ── Editor swap / backup files ───────────────────────────────────────────────
+*.swp
+*.swo
+*~
