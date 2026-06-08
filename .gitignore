@@ -10,6 +10,9 @@ build/
 .project
 *.launch
 
+# ── STM32CubeIDE / Eclipse artefacts ────────────────────────────────────────
+.vscode/
+
 # ── Object / dependency / analysis files (if ever outside Debug/) ───────────
 *.o
 *.d

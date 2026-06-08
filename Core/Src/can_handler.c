@@ -1,5 +1,6 @@
 #include "can_handler.h"
 #include "usb_cdc_handler.h"
+#include "main.h"   /* LED_Pin, LED_GPIO_Port */
 #include <string.h>
 #include <stdio.h>
 
@@ -15,6 +16,9 @@ static struct {
 } pb;
 
 extern CAN_HandleTypeDef hcan;
+
+/* Timestamp of the last received frame — written by ISR, read by main loop */
+static volatile uint32_t last_rx_tick = 0;
 
 /* ── Module state ────────────────────────────────────────────────────────── */
 static struct {
@@ -95,6 +99,25 @@ void CAN_Handler_Process(void)
     /* Drain any frames queued by the RX ISR first */
     pb_drain();
 
+    /* Blink LED at 5 Hz while CAN frames are being received;
+     * turn it off after 500 ms of bus silence. LED is active-low on Blue Pill. */
+    {
+        static uint32_t led_tick = 0;
+        uint32_t now_ms = HAL_GetTick();
+        if (now_ms - last_rx_tick < 500U)
+        {
+            if (now_ms - led_tick >= 100U)
+            {
+                led_tick = now_ms;
+                HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
+            }
+        }
+        else
+        {
+            HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET); /* OFF */
+        }
+    }
+
     if (!ctx.tx_active) return;
 
     uint32_t now         = HAL_GetTick();
@@ -141,6 +164,7 @@ void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan_ptr)
     while (HAL_CAN_GetRxMessage(hcan_ptr, CAN_RX_FIFO1, &hdr, data) == HAL_OK)
     {
         ctx.stats.rx_count++;
+        last_rx_tick = HAL_GetTick();   /* drives LED blink in main loop */
 
         if (!ctx.listen_mode) continue;
 
