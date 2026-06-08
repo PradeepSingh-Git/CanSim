@@ -55,6 +55,19 @@ void CAN_Handler_Init(void)
     HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO1_MSG_PENDING);
 }
 
+/* Push bytes into the print ring buffer; drops silently if full.
+ * Safe to call from ISR — no blocking, no CDC calls. */
+static void pb_write(const char *s, uint16_t len)
+{
+    for (uint16_t i = 0; i < len; i++)
+    {
+        uint16_t next = (pb.head + 1U) & PRINT_BUF_MASK;
+        if (next == pb.tail) return;   /* full — drop rest of this message */
+        pb.buf[pb.head] = s[i];
+        pb.head = next;
+    }
+}
+
 /* ── Print buffer drain – called from main loop ──────────────────────────── */
 static void pb_drain(void)
 {
@@ -101,22 +114,22 @@ void CAN_Handler_Process(void)
 
     uint32_t mailbox;
     if (HAL_CAN_AddTxMessage(&hcan, &hdr, ctx.data, &mailbox) == HAL_OK)
+    {
         ctx.stats.tx_count++;
+        if (ctx.listen_mode)
+        {
+            char buf[72];
+            int  n = snprintf(buf, sizeof(buf),
+                              "TX  ID:0x%03lX  DLC:%u  DATA:",
+                              (unsigned long)ctx.id, (unsigned)ctx.dlc);
+            for (uint8_t i = 0; i < ctx.dlc; i++)
+                n += snprintf(buf + n, sizeof(buf) - (size_t)n, " %02X", ctx.data[i]);
+            buf[n++] = '\r'; buf[n++] = '\n';
+            pb_write(buf, (uint16_t)n);
+        }
+    }
     else
         ctx.stats.tx_errors++;
-}
-
-/* Push bytes into the print ring buffer; drops silently if full.
- * Safe to call from ISR — no blocking, no CDC calls. */
-static void pb_write(const char *s, uint16_t len)
-{
-    for (uint16_t i = 0; i < len; i++)
-    {
-        uint16_t next = (pb.head + 1U) & PRINT_BUF_MASK;
-        if (next == pb.tail) return;   /* full — drop rest of this message */
-        pb.buf[pb.head] = s[i];
-        pb.head = next;
-    }
 }
 
 /* ── RX FIFO1 callback (from CAN1_RX1_IRQn, no USB conflict) ────────────── */

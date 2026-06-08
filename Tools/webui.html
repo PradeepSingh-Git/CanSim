@@ -42,6 +42,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .btn.primary:hover { filter: brightness(1.15); }
 .btn.danger { background: var(--red); color: #0f1117; border-color: var(--red); font-weight: 600; }
 .btn.success { background: var(--green); color: #0f1117; border-color: var(--green); font-weight: 600; }
+.btn:disabled { opacity: .35; cursor: not-allowed; filter: none; }
 #conn-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); display: inline-block; margin-right: 5px; }
 #conn-dot.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
 #conn-label { font-size: 12px; color: var(--muted); margin-right: 6px; }
@@ -131,6 +132,8 @@ td.mono { font-family: monospace; }
 td.id-cell { font-family: monospace; font-weight: 700; }
 .id-known { color: var(--cyan); }
 .id-unknown { color: var(--muted); }
+.dir-rx { color: var(--green); font-size: 11px; font-weight: 700; font-family: monospace; }
+.dir-tx { color: var(--amber); font-size: 11px; font-weight: 700; font-family: monospace; }
 td.name-cell { color: var(--text); }
 td.data-cell { font-family: monospace; color: var(--amber); font-size: 11px; }
 td.sig-cell { max-width: 300px; }
@@ -284,6 +287,7 @@ select option { background: var(--surf2); }
           <thead>
             <tr>
               <th style="width:88px">Time</th>
+              <th style="width:28px;text-align:center">Dir</th>
               <th style="width:44px;text-align:right" title="Frame count">Count</th>
               <th style="width:58px">ID</th>
               <th style="width:150px">Name</th>
@@ -333,8 +337,8 @@ select option { background: var(--surf2); }
         </div>
         <div class="can-ctrl">
           <button class="btn primary" onclick="configureTX()">Configure</button>
-          <button class="btn success" onclick="canOn()">CAN ON</button>
-          <button class="btn danger"  onclick="canOff()">CAN OFF</button>
+          <button class="btn success" id="tx-on-btn"  onclick="canOn()">Tx ON</button>
+          <button class="btn danger"  id="tx-off-btn" onclick="canOff()" disabled>Tx OFF</button>
           <span id="can-state-badge">OFF</span>
         </div>
       </div>
@@ -353,8 +357,8 @@ select option { background: var(--surf2); }
           <div id="dbc-tx-preview"><span>Data:</span>&mdash;</div>
           <div class="can-ctrl">
             <button class="btn primary" onclick="configureFromDBC()">Configure &amp; Apply</button>
-            <button class="btn success" onclick="canOn()">CAN ON</button>
-            <button class="btn danger"  onclick="canOff()">CAN OFF</button>
+            <button class="btn success" id="dbc-tx-on-btn"  onclick="canOn()">Tx ON</button>
+            <button class="btn danger"  id="dbc-tx-off-btn" onclick="canOff()" disabled>Tx OFF</button>
           </div>
         </div>
       </div>
@@ -499,11 +503,12 @@ function encodeSignalIntoBytes(bytes, sig, physVal) {
 // FRAME PARSER (CANSim output format)
 // ══════════════════════════════════════════════════════════════════════
 function parseFrame(line) {
+  // TX  ID:0x123  DLC:8  DATA: DE AD BE EF 00 00 00 00
   // RX  ID:0x7DF  DLC:8  DATA: 02 10 03 AA BB CC DD EE
-  const m = line.match(/RX\s+ID:0x([0-9A-Fa-f]+)\s+DLC:(\d+)\s+DATA:\s*((?:[0-9A-Fa-f]{2}\s*)+)/i);
+  const m = line.match(/(TX|RX)\s+ID:0x([0-9A-Fa-f]+)\s+DLC:(\d+)\s+DATA:\s*((?:[0-9A-Fa-f]{2}\s*)+)/i);
   if (!m) return null;
-  const data = new Uint8Array(m[3].trim().split(/\s+/).map(h => parseInt(h, 16)));
-  return { id: parseInt(m[1], 16), dlc: +m[2], data };
+  const data = new Uint8Array(m[4].trim().split(/\s+/).map(h => parseInt(h, 16)));
+  return { dir: m[1].toUpperCase(), id: parseInt(m[2], 16), dlc: +m[3], data };
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -622,12 +627,19 @@ function setConnUI(connected) {
 // ══════════════════════════════════════════════════════════════════════
 // TRAFFIC TABLE
 // ══════════════════════════════════════════════════════════════════════
-const lastRows = new Map();   // id → <tr> element
-const allFrames = [];         // { id, dlc, data, ts, count }
+const lastRows = new Map();   // "id_DIR" → <tr> element
+const allFrames = [];
 let totalFrames = 0;
 let expandedRow = null;
 
+function dirBadge(dir) {
+  return dir === 'TX'
+    ? '<span class="dir-tx">TX</span>'
+    : '<span class="dir-rx">RX</span>';
+}
+
 function addTrafficFrame(frame) {
+  const dir = frame.dir || 'RX';
   const now = new Date();
   const ts = now.toTimeString().slice(0,8) + '.' + String(now.getMilliseconds()).padStart(3,'0');
   totalFrames++;
@@ -642,7 +654,6 @@ function addTrafficFrame(frame) {
   const name = msg ? msg.name : '—';
   const dataHex = Array.from(frame.data).map(b => b.toString(16).toUpperCase().padStart(2,'0')).join(' ');
 
-  // Decode signals
   const decoded = msg ? msg.signals.map(s => ({ sig: s, val: decodeSignal(frame.data, s) })) : [];
 
   function makeChips(list) {
@@ -651,7 +662,7 @@ function addTrafficFrame(frame) {
     ).join('') + (list.length > 4 ? `<span class="sig-chip" style="color:var(--muted)">+${list.length-4} more</span>` : '');
   }
 
-  function makeDetail(list, bytes) {
+  function makeDetail(list) {
     if (!list.length) return '<span style="color:var(--muted)">No signals in DBC for this ID.</span>';
     return '<div class="sig-grid">' + list.map(d =>
       `<div class="sig-box">
@@ -662,40 +673,42 @@ function addTrafficFrame(frame) {
     ).join('') + '</div>';
   }
 
+  // Last Value mode keys by "id_DIR" so TX and RX for the same ID get separate rows
+  const rowKey = `${frame.id}_${dir}`;
+
   if (lastVal) {
-    // ── Last Value mode: one row per ID, updated in place ──────────────
-    if (lastRows.has(frame.id)) {
-      const tr = lastRows.get(frame.id);
+    // ── Last Value mode: one row per ID+direction, updated in place ────
+    if (lastRows.has(rowKey)) {
+      const tr = lastRows.get(rowKey);
       if (!filterMatch) { tr.style.display = 'none'; return; }
       tr.style.display = '';
-      // cells: [0]=time [1]=count [2]=ID [3]=name [4]=DLC [5]=data [6]=signals
+      // cells: [0]=time [1]=dir [2]=count [3]=ID [4]=name [5]=DLC [6]=data [7]=signals
       const cells = tr.cells;
       cells[0].textContent = ts;
-      cells[1].textContent = parseInt(cells[1].textContent || '0') + 1;
-      cells[4].textContent = frame.dlc;
-      cells[5].textContent = dataHex;
-      cells[6].innerHTML   = makeChips(decoded);
+      cells[2].textContent = parseInt(cells[2].textContent || '0') + 1;
+      cells[5].textContent = frame.dlc;
+      cells[6].textContent = dataHex;
+      cells[7].innerHTML   = makeChips(decoded);
       tr.dataset.canData = Array.from(frame.data).map(b => b.toString(16).padStart(2,'0')).join('');
-      // Throttle flash to once per 400 ms — no forced reflow.
       const now2 = Date.now();
       if (!tr._lastFlash || now2 - tr._lastFlash > 400) {
         tr._lastFlash = now2;
         tr.classList.remove('flash');
         requestAnimationFrame(() => tr.classList.add('flash'));
       }
-      // Keep expanded detail current.
       if (expandedRow === tr) {
         const dtr = tr.nextElementSibling;
         if (dtr && dtr.classList.contains('sig-detail'))
-          dtr.querySelector('td').innerHTML = makeDetail(decoded, frame.data);
+          dtr.querySelector('td').innerHTML = makeDetail(decoded);
       }
     } else {
       if (!filterMatch) return;
       const tr = document.createElement('tr');
-      tr.dataset.canId = frame.id;
+      tr.dataset.canId   = frame.id;
       tr.dataset.canData = Array.from(frame.data).map(b => b.toString(16).padStart(2,'0')).join('');
       tr.innerHTML =
         `<td class="mono">${ts}</td>` +
+        `<td style="text-align:center">${dirBadge(dir)}</td>` +
         `<td class="mono" style="color:var(--muted);text-align:right">1</td>` +
         `<td class="id-cell ${msg ? 'id-known' : 'id-unknown'}">0x${idHex}</td>` +
         `<td class="name-cell">${name}</td>` +
@@ -704,10 +717,10 @@ function addTrafficFrame(frame) {
         `<td class="sig-cell">${makeChips(decoded)}</td>`;
       tr.classList.add('flash');
       tr.addEventListener('click', () => toggleDetail(tr));
-      lastRows.set(frame.id, tr);
+      lastRows.set(rowKey, tr);
       const dtr = document.createElement('tr');
       dtr.className = 'sig-detail';
-      dtr.innerHTML = `<td colspan="7" style="padding:0"></td>`;
+      dtr.innerHTML = `<td colspan="8" style="padding:0"></td>`;
       tbody().appendChild(tr);
       tbody().appendChild(dtr);
       document.getElementById('no-traffic').style.display = 'none';
@@ -716,10 +729,11 @@ function addTrafficFrame(frame) {
     // ── Log mode: append one row per frame ─────────────────────────────
     if (!filterMatch) return;
     const tr = document.createElement('tr');
-    tr.dataset.canId = frame.id;
+    tr.dataset.canId   = frame.id;
     tr.dataset.canData = Array.from(frame.data).map(b => b.toString(16).padStart(2,'0')).join('');
     tr.innerHTML =
       `<td class="mono">${ts}</td>` +
+      `<td style="text-align:center">${dirBadge(dir)}</td>` +
       `<td class="mono" style="color:var(--muted);text-align:right">—</td>` +
       `<td class="id-cell ${msg ? 'id-known' : 'id-unknown'}">0x${idHex}</td>` +
       `<td class="name-cell">${name}</td>` +
@@ -729,7 +743,7 @@ function addTrafficFrame(frame) {
     tr.addEventListener('click', () => toggleDetail(tr));
     const dtr = document.createElement('tr');
     dtr.className = 'sig-detail';
-    dtr.innerHTML = `<td colspan="7" style="padding:0"></td>`;
+    dtr.innerHTML = `<td colspan="8" style="padding:0"></td>`;
     const b = tbody();
     b.appendChild(tr);
     b.appendChild(dtr);
@@ -864,6 +878,15 @@ function updateCanBadge() {
   const b = document.getElementById('can-state-badge');
   b.textContent = canActive ? 'ON' : 'OFF';
   b.className = canActive ? 'on' : '';
+  // Grey out the button matching the current state; enable the opposite
+  ['tx-on-btn', 'dbc-tx-on-btn'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = canActive;
+  });
+  ['tx-off-btn', 'dbc-tx-off-btn'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = !canActive;
+  });
 }
 
 const delay = ms => new Promise(r => setTimeout(r, ms));
