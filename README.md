@@ -1,7 +1,23 @@
 # 🚌 CANSim
 
+> **A cost-effective open-source alternative to professional CAN interfaces** such as Vector CANalyzer/CANoe, PEAK PCAN, or Kvaser — built on a ~$2 STM32F103C8T6 Blue Pill board.
+
 CAN Bus Simulator for **STM32F103C8T6** (Blue Pill).  
-Transmits periodic CAN frames, prints received frames over a **USB CDC virtual COM port**, and pairs with a browser-based Web UI for live DBC-decoded traffic display and message transmission — no UART adapter, no native drivers.
+Transmits periodic CAN frames, prints received frames over a **USB CDC virtual COM port**, and pairs with a browser-based Web UI for live DBC-decoded traffic display and message transmission — no UART adapter, no native drivers, no expensive licences.
+
+---
+
+## 💡 Motivation
+
+Professional CAN bus tools — Vector CANalyzer, CANoe, PEAK PCAN, Kvaser — cost anywhere from **hundreds to thousands of dollars** and often require proprietary drivers or OS-specific software. CANSim was built to fill that gap for engineers, students, and hobbyists who need a capable CAN interface on a tight budget.
+
+| | CANSim | Typical commercial tool |
+|---|---|---|
+| 💰 **Hardware cost** | ~$2–5 (Blue Pill + TJA1051) | $200–$2000+ |
+| 🔌 **Driver required** | None (USB CDC) | Vendor driver |
+| 🌐 **UI** | Browser-based, no install | Windows app / licence |
+| 📋 **DBC decode** | ✅ built-in | ✅ (paid licence) |
+| 🔧 **Open source** | ✅ fully | ❌ proprietary |
 
 ---
 
