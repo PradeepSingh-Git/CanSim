@@ -3,6 +3,17 @@
 #include <string.h>
 #include <stdio.h>
 
+/* ── Print ring buffer ───────────────────────────────────────────────────────
+ * ISR writes formatted frame strings here; main loop drains to USB CDC.
+ * Keeping CDC calls out of ISR context prevents HAL_Delay blocking SysTick. */
+#define PRINT_BUF_SIZE 1024U
+#define PRINT_BUF_MASK (PRINT_BUF_SIZE - 1U)
+static struct {
+    char              buf[PRINT_BUF_SIZE];
+    volatile uint16_t head;   /* written by ISR  */
+    volatile uint16_t tail;   /* read  by main loop */
+} pb;
+
 extern CAN_HandleTypeDef hcan;
 
 /* ── Module state ────────────────────────────────────────────────────────── */
@@ -44,9 +55,33 @@ void CAN_Handler_Init(void)
     HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO1_MSG_PENDING);
 }
 
+/* ── Print buffer drain – called from main loop ──────────────────────────── */
+static void pb_drain(void)
+{
+    uint16_t h = pb.head;   /* snapshot — ISR only advances head */
+    uint16_t t = pb.tail;
+
+    if (h == t) return;
+
+    if (h > t)
+    {
+        CDC_Handler_Write((uint8_t *)&pb.buf[t], (uint16_t)(h - t));
+        pb.tail = h;
+    }
+    else
+    {
+        /* Wrapped: write to end of buffer this call; 0..h picked up next call */
+        CDC_Handler_Write((uint8_t *)&pb.buf[t], (uint16_t)(PRINT_BUF_SIZE - t));
+        pb.tail = 0;
+    }
+}
+
 /* ── Periodic TX – called from main loop ─────────────────────────────────── */
 void CAN_Handler_Process(void)
 {
+    /* Drain any frames queued by the RX ISR first */
+    pb_drain();
+
     if (!ctx.tx_active) return;
 
     uint32_t now         = HAL_GetTick();
@@ -71,6 +106,19 @@ void CAN_Handler_Process(void)
         ctx.stats.tx_errors++;
 }
 
+/* Push bytes into the print ring buffer; drops silently if full.
+ * Safe to call from ISR — no blocking, no CDC calls. */
+static void pb_write(const char *s, uint16_t len)
+{
+    for (uint16_t i = 0; i < len; i++)
+    {
+        uint16_t next = (pb.head + 1U) & PRINT_BUF_MASK;
+        if (next == pb.tail) return;   /* full — drop rest of this message */
+        pb.buf[pb.head] = s[i];
+        pb.head = next;
+    }
+}
+
 /* ── RX FIFO1 callback (from CAN1_RX1_IRQn, no USB conflict) ────────────── */
 void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan_ptr)
 {
@@ -83,6 +131,8 @@ void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan_ptr)
 
         if (!ctx.listen_mode) continue;
 
+        /* Format into a local buffer then push to the print ring —
+         * never call CDC_Handler_Write here; it may block via HAL_Delay. */
         char buf[72];
         int  n = snprintf(buf, sizeof(buf),
                           "\r\nRX  ID:0x%03lX  DLC:%u  DATA:",
@@ -91,7 +141,7 @@ void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan_ptr)
             n += snprintf(buf + n, sizeof(buf) - (size_t)n, " %02X", data[i]);
 
         buf[n++] = '\r'; buf[n++] = '\n';
-        CDC_Handler_Write((uint8_t *)buf, (uint16_t)n);
+        pb_write(buf, (uint16_t)n);
     }
 }
 
